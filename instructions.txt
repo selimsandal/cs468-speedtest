@@ -1,0 +1,17 @@
+﻿Speed Testing
+Prerequisites
+1. The project is to be completed by teams of two.
+2. You can use any programming language and platform you want. However, make sure your code is easily readable with sufficient explanations and comments. Use a proper and consistent naming convention. 
+3. Do not simply copy/paste someone else’s code. You cannot simply use an existing library for the core functionality of speed testing.
+4. You can discuss the project among yourselves or in the Google Classroom forum, but do not use each other’s code.
+5. You must enclose instructions (a readme file) on how to compile, build and/or run your code (along with any system requirements). Refrain from requiring too many things.
+6. Start early and try out different ideas before the submission.
+Submission and Demo
+Create a single zip file that includes everything, name the file lastnames_project1.zip and upload it in Google Classroom. We will have the demos during a designated class hour or office hours.
+Problem to Solve 
+You will build a speed testing tool on a website residing in the cloud (AWS, Google, whatever your favorite is) that will allow users to measure their upload and download speeds. Alternatively, if you have access to a Web server that you know the transmission is not throttled, you can use that server as well. Ideally, you will need to have objects in a variety of sizes for proper testing.
+* A user will visit your website (URL), and once the start button is clicked, the measurement will start. First, the ping time will be reported (the round-trip time between the user’s browser and your server) in milliseconds. Then, the download speed will be measured and reported, and finally, the upload speed will be measured and reported. Do not forget the units.
+* To get an idea, you can visit https://www.speedtest.net/, https://fast.com/,  https://www.hiztesti.com.tr/. The course reading list also has some pointers.
+* The UI does not have to be very fancy, but the test progress and results should be visible clearly.
+* Your goal is to come up with accurate results within the shortest amount of time and with the minimum amount of data spent (for upload and download). In each test, you must report how much data was downloaded and uploaded by the user.
+* To cross-check your results, compare them with other speed testing tools from nearby servers. Your results may be a bit different, but should not be too different from their results.
