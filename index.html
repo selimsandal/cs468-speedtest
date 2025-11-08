@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speed Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+
+        .server-input {
+            margin-bottom: 20px;
+        }
+
+        .server-input label {
+            display: block;
+            margin-bottom: 8px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .server-input input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .server-input input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .start-button {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-bottom: 30px;
+        }
+
+        .start-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .start-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .test-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            border: 2px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .test-section.active {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .test-section.completed {
+            border-color: #4caf50;
+            background: #f1f8f4;
+        }
+
+        .test-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .test-name {
+            font-weight: 600;
+            color: #333;
+            font-size: 16px;
+        }
+
+        .test-status {
+            font-size: 12px;
+            color: #999;
+            font-weight: 500;
+        }
+
+        .test-section.active .test-status {
+            color: #667eea;
+        }
+
+        .test-section.completed .test-status {
+            color: #4caf50;
+        }
+
+        .result-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #667eea;
+            margin: 10px 0;
+        }
+
+        .test-section.completed .result-value {
+            color: #4caf50;
+        }
+
+        .result-unit {
+            font-size: 14px;
+            color: #666;
+            margin-left: 5px;
+        }
+
+        .data-usage {
+            font-size: 13px;
+            color: #888;
+            margin-top: 8px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 12px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .summary {
+            margin-top: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            color: white;
+            display: none;
+        }
+
+        .summary.show {
+            display: block;
+        }
+
+        .summary h2 {
+            margin-bottom: 15px;
+            font-size: 20px;
+        }
+
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+            border: 1px solid #ef5350;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #667eea;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.8s linear infinite;
+            margin-left: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Speed Test</h1>
+
+        <div class="server-input">
+            <label for="serverUrl">Server URL:</label>
+            <input type="text" id="serverUrl" placeholder="http://localhost:8080">
+        </div>
+
+        <button class="start-button" id="startButton">Start Test</button>
+
+        <div class="test-section" id="pingSection">
+            <div class="test-header">
+                <span class="test-name">Ping / Latency</span>
+                <span class="test-status" id="pingStatus">Waiting...</span>
+            </div>
+            <div class="result-value" id="pingResult">--<span class="result-unit">ms</span></div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="pingProgress"></div>
+            </div>
+        </div>
+
+        <div class="test-section" id="downloadSection">
+            <div class="test-header">
+                <span class="test-name">Download Speed</span>
+                <span class="test-status" id="downloadStatus">Waiting...</span>
+            </div>
+            <div class="result-value" id="downloadResult">--<span class="result-unit">Mbps</span></div>
+            <div class="data-usage" id="downloadData">Data used: --</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="downloadProgress"></div>
+            </div>
+        </div>
+
+        <div class="test-section" id="uploadSection">
+            <div class="test-header">
+                <span class="test-name">Upload Speed</span>
+                <span class="test-status" id="uploadStatus">Waiting...</span>
+            </div>
+            <div class="result-value" id="uploadResult">--<span class="result-unit">Mbps</span></div>
+            <div class="data-usage" id="uploadData">Data used: --</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="uploadProgress"></div>
+            </div>
+        </div>
+
+        <div class="summary" id="summary">
+            <h2>Test Summary</h2>
+            <div class="summary-item">
+                <span>Average Ping:</span>
+                <span id="summaryPing">--</span>
+            </div>
+            <div class="summary-item">
+                <span>Download Speed:</span>
+                <span id="summaryDownload">--</span>
+            </div>
+            <div class="summary-item">
+                <span>Upload Speed:</span>
+                <span id="summaryUpload">--</span>
+            </div>
+            <div class="summary-item">
+                <span>Total Data Downloaded:</span>
+                <span id="summaryDownloadData">--</span>
+            </div>
+            <div class="summary-item">
+                <span>Total Data Uploaded:</span>
+                <span id="summaryUploadData">--</span>
+            </div>
+        </div>
+
+        <div class="error-message" id="errorMessage"></div>
+    </div>
+
+    <script>
+        // Auto-detect server URL based on current page location
+        window.addEventListener('DOMContentLoaded', () => {
+            const serverUrlInput = document.getElementById('serverUrl');
+            // Use the current page's origin (protocol + hostname + port)
+            const currentOrigin = window.location.origin;
+            serverUrlInput.value = currentOrigin;
+        });
+
+        // Configuration
+        const CONFIG = {
+            PING_COUNT: 5,                    // Number of ping tests to average
+            DOWNLOAD_SIZE: 10 * 1024 * 1024,  // 10 MB download
+            UPLOAD_SIZE: 5 * 1024 * 1024,     // 5 MB upload
+            DOWNLOAD_DURATION: 5000,          // Target 5 seconds for download
+            UPLOAD_DURATION: 5000             // Target 5 seconds for upload
+        };
+
+        // State
+        let serverUrl = '';
+        let testResults = {
+            ping: 0,
+            download: 0,
+            upload: 0,
+            downloadData: 0,
+            uploadData: 0
+        };
+
+        // DOM Elements
+        const elements = {
+            serverUrl: document.getElementById('serverUrl'),
+            startButton: document.getElementById('startButton'),
+            pingSection: document.getElementById('pingSection'),
+            pingStatus: document.getElementById('pingStatus'),
+            pingResult: document.getElementById('pingResult'),
+            pingProgress: document.getElementById('pingProgress'),
+            downloadSection: document.getElementById('downloadSection'),
+            downloadStatus: document.getElementById('downloadStatus'),
+            downloadResult: document.getElementById('downloadResult'),
+            downloadData: document.getElementById('downloadData'),
+            downloadProgress: document.getElementById('downloadProgress'),
+            uploadSection: document.getElementById('uploadSection'),
+            uploadStatus: document.getElementById('uploadStatus'),
+            uploadResult: document.getElementById('uploadResult'),
+            uploadData: document.getElementById('uploadData'),
+            uploadProgress: document.getElementById('uploadProgress'),
+            summary: document.getElementById('summary'),
+            errorMessage: document.getElementById('errorMessage')
+        };
+
+        // Utility Functions
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatSpeed(bitsPerSecond) {
+            const mbps = bitsPerSecond / (1024 * 1024);
+            return mbps.toFixed(2);
+        }
+
+        function showError(message) {
+            elements.errorMessage.textContent = message;
+            elements.errorMessage.classList.add('show');
+        }
+
+        function hideError() {
+            elements.errorMessage.classList.remove('show');
+        }
+
+        function setTestStatus(section, status, progress) {
+            const statusElement = elements[section + 'Status'];
+            const progressElement = elements[section + 'Progress'];
+            const sectionElement = elements[section + 'Section'];
+
+            statusElement.textContent = status;
+            if (progress !== undefined) {
+                progressElement.style.width = progress + '%';
+            }
+
+            if (status === 'Testing...') {
+                sectionElement.classList.add('active');
+                sectionElement.classList.remove('completed');
+            } else if (status === 'Completed') {
+                sectionElement.classList.remove('active');
+                sectionElement.classList.add('completed');
+            } else {
+                sectionElement.classList.remove('active', 'completed');
+            }
+        }
+
+        function resetUI() {
+            elements.pingResult.innerHTML = '--<span class="result-unit">ms</span>';
+            elements.downloadResult.innerHTML = '--<span class="result-unit">Mbps</span>';
+            elements.uploadResult.innerHTML = '--<span class="result-unit">Mbps</span>';
+            elements.downloadData.textContent = 'Data used: --';
+            elements.uploadData.textContent = 'Data used: --';
+
+            setTestStatus('ping', 'Waiting...', 0);
+            setTestStatus('download', 'Waiting...', 0);
+            setTestStatus('upload', 'Waiting...', 0);
+
+            elements.summary.classList.remove('show');
+            hideError();
+        }
+
+        // Ping Test
+        async function testPing() {
+            setTestStatus('ping', 'Testing...', 0);
+            const pingTimes = [];
+
+            for (let i = 0; i < CONFIG.PING_COUNT; i++) {
+                try {
+                    const startTime = performance.now();
+                    const response = await fetch(`${serverUrl}/ping`, {
+                        method: 'GET',
+                        cache: 'no-cache'
+                    });
+                    const endTime = performance.now();
+
+                    if (!response.ok) {
+                        throw new Error(`Ping failed with status ${response.status}`);
+                    }
+
+                    const rtt = endTime - startTime;
+                    pingTimes.push(rtt);
+
+                    // Update progress
+                    const progress = ((i + 1) / CONFIG.PING_COUNT) * 100;
+                    setTestStatus('ping', `Testing... (${i + 1}/${CONFIG.PING_COUNT})`, progress);
+
+                    // Update display with current average
+                    const currentAvg = pingTimes.reduce((a, b) => a + b, 0) / pingTimes.length;
+                    elements.pingResult.innerHTML = `${currentAvg.toFixed(1)}<span class="result-unit">ms</span>`;
+
+                    // Small delay between pings
+                    if (i < CONFIG.PING_COUNT - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                } catch (error) {
+                    throw new Error(`Ping test failed: ${error.message}`);
+                }
+            }
+
+            // Calculate average
+            const averagePing = pingTimes.reduce((a, b) => a + b, 0) / pingTimes.length;
+            testResults.ping = averagePing;
+
+            elements.pingResult.innerHTML = `${averagePing.toFixed(1)}<span class="result-unit">ms</span>`;
+            setTestStatus('ping', 'Completed', 100);
+
+            return averagePing;
+        }
+
+        // Download Test
+        async function testDownload() {
+            setTestStatus('download', 'Testing...', 0);
+
+            const startTime = performance.now();
+            let totalBytes = 0;
+
+            try {
+                const response = await fetch(`${serverUrl}/download?size=${CONFIG.DOWNLOAD_SIZE}`, {
+                    method: 'GET',
+                    cache: 'no-cache'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Download failed with status ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const contentLength = parseInt(response.headers.get('Content-Length') || CONFIG.DOWNLOAD_SIZE);
+
+                let receivedBytes = 0;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+
+                    if (done) break;
+
+                    receivedBytes += value.length;
+                    totalBytes += value.length;
+
+                    // Update progress
+                    const progress = (receivedBytes / contentLength) * 100;
+                    setTestStatus('download', 'Testing...', progress);
+
+                    // Calculate current speed
+                    const elapsedTime = (performance.now() - startTime) / 1000; // in seconds
+                    const bitsReceived = receivedBytes * 8;
+                    const currentSpeed = bitsReceived / elapsedTime;
+
+                    elements.downloadResult.innerHTML = `${formatSpeed(currentSpeed)}<span class="result-unit">Mbps</span>`;
+                    elements.downloadData.textContent = `Data used: ${formatBytes(receivedBytes)}`;
+                }
+
+                const endTime = performance.now();
+                const duration = (endTime - startTime) / 1000; // in seconds
+                const bitsDownloaded = totalBytes * 8;
+                const downloadSpeed = bitsDownloaded / duration;
+
+                testResults.download = downloadSpeed / (1024 * 1024); // Convert to Mbps
+                testResults.downloadData = totalBytes;
+
+                elements.downloadResult.innerHTML = `${formatSpeed(downloadSpeed)}<span class="result-unit">Mbps</span>`;
+                elements.downloadData.textContent = `Data used: ${formatBytes(totalBytes)}`;
+                setTestStatus('download', 'Completed', 100);
+
+                return downloadSpeed;
+            } catch (error) {
+                throw new Error(`Download test failed: ${error.message}`);
+            }
+        }
+
+        // Upload Test
+        async function testUpload() {
+            setTestStatus('upload', 'Testing...', 0);
+
+            // Generate random data
+            const uploadData = new Uint8Array(CONFIG.UPLOAD_SIZE);
+            crypto.getRandomValues(uploadData);
+
+            const startTime = performance.now();
+
+            try {
+                // Use XMLHttpRequest for upload progress tracking
+                const uploadSpeed = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+
+                    xhr.upload.addEventListener('progress', (event) => {
+                        if (event.lengthComputable) {
+                            const progress = (event.loaded / event.total) * 100;
+                            setTestStatus('upload', 'Testing...', progress);
+
+                            const elapsedTime = (performance.now() - startTime) / 1000;
+                            const bitsUploaded = event.loaded * 8;
+                            const currentSpeed = bitsUploaded / elapsedTime;
+
+                            elements.uploadResult.innerHTML = `${formatSpeed(currentSpeed)}<span class="result-unit">Mbps</span>`;
+                            elements.uploadData.textContent = `Data used: ${formatBytes(event.loaded)}`;
+                        }
+                    });
+
+                    xhr.addEventListener('load', () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            const endTime = performance.now();
+                            const duration = (endTime - startTime) / 1000;
+                            const bitsUploaded = CONFIG.UPLOAD_SIZE * 8;
+                            const uploadSpeed = bitsUploaded / duration;
+                            resolve(uploadSpeed);
+                        } else {
+                            reject(new Error(`Upload failed with status ${xhr.status}`));
+                        }
+                    });
+
+                    xhr.addEventListener('error', () => {
+                        reject(new Error('Upload request failed'));
+                    });
+
+                    xhr.open('POST', `${serverUrl}/upload`);
+                    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+                    xhr.send(uploadData);
+                });
+
+                testResults.upload = uploadSpeed / (1024 * 1024); // Convert to Mbps
+                testResults.uploadData = CONFIG.UPLOAD_SIZE;
+
+                elements.uploadResult.innerHTML = `${formatSpeed(uploadSpeed)}<span class="result-unit">Mbps</span>`;
+                elements.uploadData.textContent = `Data used: ${formatBytes(CONFIG.UPLOAD_SIZE)}`;
+                setTestStatus('upload', 'Completed', 100);
+
+                return uploadSpeed;
+            } catch (error) {
+                throw new Error(`Upload test failed: ${error.message}`);
+            }
+        }
+
+        // Show Summary
+        function showSummary() {
+            document.getElementById('summaryPing').textContent = `${testResults.ping.toFixed(1)} ms`;
+            document.getElementById('summaryDownload').textContent = `${testResults.download.toFixed(2)} Mbps`;
+            document.getElementById('summaryUpload').textContent = `${testResults.upload.toFixed(2)} Mbps`;
+            document.getElementById('summaryDownloadData').textContent = formatBytes(testResults.downloadData);
+            document.getElementById('summaryUploadData').textContent = formatBytes(testResults.uploadData);
+
+            elements.summary.classList.add('show');
+        }
+
+        // Main Test Function
+        async function runSpeedTest() {
+            serverUrl = elements.serverUrl.value.trim();
+
+            if (!serverUrl) {
+                showError('Please enter a server URL');
+                return;
+            }
+
+            // Disable button
+            elements.startButton.disabled = true;
+            elements.startButton.textContent = 'Testing...';
+
+            // Reset UI
+            resetUI();
+
+            try {
+                // Test server connectivity
+                const healthResponse = await fetch(`${serverUrl}/health`);
+                if (!healthResponse.ok) {
+                    throw new Error('Cannot connect to server');
+                }
+
+                // Run tests sequentially
+                await testPing();
+                await new Promise(resolve => setTimeout(resolve, 500)); // Small delay
+
+                await testDownload();
+                await new Promise(resolve => setTimeout(resolve, 500)); // Small delay
+
+                await testUpload();
+
+                // Show summary
+                showSummary();
+
+            } catch (error) {
+                showError(error.message);
+                console.error('Test error:', error);
+            } finally {
+                // Re-enable button
+                elements.startButton.disabled = false;
+                elements.startButton.textContent = 'Start Test';
+            }
+        }
+
+        // Event Listeners
+        elements.startButton.addEventListener('click', runSpeedTest);
+
+        // Allow Enter key in server URL input
+        elements.serverUrl.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                runSpeedTest();
+            }
+        });
+    </script>
+</body>
+</html>

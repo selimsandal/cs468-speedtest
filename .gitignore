@@ -6,6 +6,20 @@
 ehthumbs.db
 Thumbs.db
 
+# Go compiled binaries
+speedtest-server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test files
+*.test
+
+# Go build cache
+go.sum
+
 # Logs
 logs
 *.log

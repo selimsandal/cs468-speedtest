@@ -1,0 +1,19 @@
+[Unit]
+Description=Speed Test Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/cs468-speedtest
+ExecStart=/root/cs468-speedtest/speedtest-server
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables (optional)
+# Environment="PORT=8080"
+
+[Install]
+WantedBy=multi-user.target
