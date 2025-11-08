@@ -71,12 +71,12 @@ http://localhost:8080
 
 ## Usage
 
-1. The server URL field is pre-filled with `http://localhost:8080`
+1. The server URL field is auto-detected based on the current domain
 2. Click the "Start Test" button to begin the speed test
 3. The test will run in three phases:
    - **Ping Test**: Measures latency by sending 5 ping requests
-   - **Download Test**: Downloads 10 MB of data to measure download speed
-   - **Upload Test**: Uploads 5 MB of data to measure upload speed
+   - **Download Test**: Downloads 50 MB of data to measure download speed
+   - **Upload Test**: Uploads 25 MB of data to measure upload speed
 4. Results are displayed in real-time and summarized at the end
 
 ## API Endpoints
@@ -85,7 +85,7 @@ The backend provides the following REST API endpoints:
 
 - `GET /` - Serves the frontend HTML interface
 - `GET /ping` - Returns a timestamp for latency measurement
-- `GET /download?size=<bytes>` - Generates random data for download testing (default: 10MB, max: 100MB)
+- `GET /download?size=<bytes>` - Generates random data for download testing (default: 50MB, max: 100MB)
 - `POST /upload` - Receives data for upload testing
 - `GET /health` - Health check endpoint
 
@@ -96,10 +96,10 @@ You can modify the following parameters in `index.html` if needed:
 ```javascript
 const CONFIG = {
     PING_COUNT: 5,                    // Number of ping tests to average
-    DOWNLOAD_SIZE: 10 * 1024 * 1024,  // 10 MB download
-    UPLOAD_SIZE: 5 * 1024 * 1024,     // 5 MB upload
-    DOWNLOAD_DURATION: 5000,          // Target 5 seconds for download
-    UPLOAD_DURATION: 5000             // Target 5 seconds for upload
+    DOWNLOAD_SIZE: 50 * 1024 * 1024,  // 50 MB download
+    UPLOAD_SIZE: 25 * 1024 * 1024,    // 25 MB upload
+    DOWNLOAD_DURATION: 10000,         // Target 10 seconds for download
+    UPLOAD_DURATION: 10000            // Target 10 seconds for upload
 };
 ```
 
