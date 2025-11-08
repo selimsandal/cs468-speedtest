@@ -37,31 +37,6 @@
             font-size: 2.5em;
         }
 
-        .server-input {
-            margin-bottom: 20px;
-        }
-
-        .server-input label {
-            display: block;
-            margin-bottom: 8px;
-            color: #666;
-            font-weight: 500;
-        }
-
-        .server-input input {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.3s;
-        }
-
-        .server-input input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
         .start-button {
             width: 100%;
             padding: 18px;
@@ -230,11 +205,6 @@
     <div class="container">
         <h1>Speed Test</h1>
 
-        <div class="server-input">
-            <label for="serverUrl">Server URL:</label>
-            <input type="text" id="serverUrl" placeholder="http://localhost:8080">
-        </div>
-
         <button class="start-button" id="startButton">Start Test</button>
 
         <div class="test-section" id="pingSection">
@@ -300,14 +270,6 @@
     </div>
 
     <script>
-        // Auto-detect server URL based on current page location
-        window.addEventListener('DOMContentLoaded', () => {
-            const serverUrlInput = document.getElementById('serverUrl');
-            // Use the current page's origin (protocol + hostname + port)
-            const currentOrigin = window.location.origin;
-            serverUrlInput.value = currentOrigin;
-        });
-
         // Configuration
         const CONFIG = {
             PING_COUNT: 5,                    // Number of ping tests to average
@@ -329,7 +291,6 @@
 
         // DOM Elements
         const elements = {
-            serverUrl: document.getElementById('serverUrl'),
             startButton: document.getElementById('startButton'),
             pingSection: document.getElementById('pingSection'),
             pingStatus: document.getElementById('pingStatus'),
@@ -647,12 +608,8 @@
 
         // Main Test Function
         async function runSpeedTest() {
-            serverUrl = elements.serverUrl.value.trim();
-
-            if (!serverUrl) {
-                showError('Please enter a server URL');
-                return;
-            }
+            // Auto-detect server URL from current page location
+            serverUrl = window.location.origin;
 
             // Disable button
             elements.startButton.disabled = true;
@@ -692,13 +649,6 @@
 
         // Event Listeners
         elements.startButton.addEventListener('click', runSpeedTest);
-
-        // Allow Enter key in server URL input
-        elements.serverUrl.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                runSpeedTest();
-            }
-        });
     </script>
 </body>
 </html>
