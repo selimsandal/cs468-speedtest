@@ -108,25 +108,27 @@ const CONFIG = {
 ### Backend (Go)
 
 - Uses standard `net/http` library
-- Generates cryptographically random data for downloads
+- **High-performance**: Pre-generates random data buffer at startup (1MB) for maximum speed
 - Implements CORS middleware for cross-origin requests
-- Efficient streaming for large data transfers
-- Memory-efficient chunked data generation (64KB chunks)
+- Efficient streaming for large data transfers with 1MB chunks
+- Memory-efficient design - reuses pre-generated buffer
 
 ### Frontend (JavaScript)
 
 - Vanilla JavaScript (no external dependencies)
-- Uses `fetch` API for ping and download tests
+- **Parallel connections**: Uses 4 simultaneous connections for download and upload tests to saturate bandwidth
+- Uses `fetch` API with ReadableStream for download tests
 - Uses `XMLHttpRequest` for upload tests (for progress tracking)
-- Real-time speed calculations and progress updates
+- Real-time speed calculations with throttled UI updates (100ms intervals)
 - Responsive design with CSS Grid and Flexbox
 
 ### Speed Calculation
 
-- **Download Speed**: Measured by dividing total bits received by elapsed time
-- **Upload Speed**: Measured by dividing total bits sent by elapsed time
-- **Ping/Latency**: Calculated as the average RTT of multiple ping requests
+- **Download Speed**: Measured using 4 parallel connections, dividing total bits received by elapsed time
+- **Upload Speed**: Measured using 4 parallel connections, dividing total bits sent by elapsed time
+- **Ping/Latency**: Calculated as the average RTT of 5 ping requests
 - All speeds are reported in Mbps (Megabits per second)
+- UI updates throttled to 100ms intervals to reduce overhead and improve accuracy
 
 ## Deployment
 

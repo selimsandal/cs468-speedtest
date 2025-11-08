@@ -1,11 +1,11 @@
 package main
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	mathrand "math/rand"
 	"net/http"
 	"os"
 	"strconv"
@@ -47,13 +47,23 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// Pre-generate a large buffer of random data to avoid repeated generation
+// This is initialized once at startup for performance
+var randomDataBuffer []byte
+
+func init() {
+	// Generate 1MB of random data once (using math/rand for speed)
+	randomDataBuffer = make([]byte, 1024*1024)
+	mathrand.Read(randomDataBuffer)
+}
+
 // downloadHandler generates random data for download speed testing
 // Query parameters:
-//   - size: number of bytes to download (default: 10MB)
+//   - size: number of bytes to download (default: 50MB)
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse size parameter (in bytes)
 	sizeStr := r.URL.Query().Get("size")
-	size := 10 * 1024 * 1024 // Default 10MB
+	size := 50 * 1024 * 1024 // Default 50MB
 
 	if sizeStr != "" {
 		if parsedSize, err := strconv.Atoi(sizeStr); err == nil && parsedSize > 0 {
@@ -61,9 +71,9 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Limit maximum size to prevent abuse (100MB)
-	if size > 100*1024*1024 {
-		size = 100 * 1024 * 1024
+	// Limit maximum size to prevent abuse (200MB for better testing)
+	if size > 200*1024*1024 {
+		size = 200 * 1024 * 1024
 	}
 
 	// Set headers
@@ -71,28 +81,26 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(size))
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 
-	// Generate and send random data in chunks for memory efficiency
-	chunkSize := 64 * 1024 // 64KB chunks
-	buffer := make([]byte, chunkSize)
+	// Send pre-generated random data in large chunks for maximum speed
+	bufferSize := len(randomDataBuffer)
 	remaining := size
 
 	for remaining > 0 {
-		currentChunk := chunkSize
-		if remaining < chunkSize {
-			currentChunk = remaining
-			buffer = make([]byte, currentChunk)
+		if remaining >= bufferSize {
+			// Send full buffer
+			if _, err := w.Write(randomDataBuffer); err != nil {
+				log.Printf("Error writing download data: %v", err)
+				return
+			}
+			remaining -= bufferSize
+		} else {
+			// Send remaining bytes
+			if _, err := w.Write(randomDataBuffer[:remaining]); err != nil {
+				log.Printf("Error writing download data: %v", err)
+				return
+			}
+			remaining = 0
 		}
-
-		// Generate random data
-		rand.Read(buffer)
-
-		// Write to response
-		if _, err := w.Write(buffer); err != nil {
-			log.Printf("Error writing download data: %v", err)
-			return
-		}
-
-		remaining -= currentChunk
 	}
 }
 

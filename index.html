@@ -456,48 +456,68 @@
             return averagePing;
         }
 
-        // Download Test
+        // Download Test - Using multiple parallel connections for maximum speed
         async function testDownload() {
             setTestStatus('download', 'Testing...', 0);
 
             const startTime = performance.now();
+            const numConnections = 4; // Use 4 parallel connections
+            const sizePerConnection = Math.floor(CONFIG.DOWNLOAD_SIZE / numConnections);
+
             let totalBytes = 0;
+            let lastUpdateTime = startTime;
+            const updateInterval = 100; // Update UI every 100ms
 
             try {
-                const response = await fetch(`${serverUrl}/download?size=${CONFIG.DOWNLOAD_SIZE}`, {
-                    method: 'GET',
-                    cache: 'no-cache'
-                });
+                // Create multiple parallel download promises
+                const downloadPromises = [];
 
-                if (!response.ok) {
-                    throw new Error(`Download failed with status ${response.status}`);
+                for (let i = 0; i < numConnections; i++) {
+                    const promise = (async () => {
+                        const response = await fetch(`${serverUrl}/download?size=${sizePerConnection}`, {
+                            method: 'GET',
+                            cache: 'no-cache'
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`Download failed with status ${response.status}`);
+                        }
+
+                        const reader = response.body.getReader();
+                        let bytesReceived = 0;
+
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+
+                            bytesReceived += value.length;
+                            totalBytes += value.length;
+
+                            // Throttle UI updates to improve performance
+                            const now = performance.now();
+                            if (now - lastUpdateTime > updateInterval) {
+                                lastUpdateTime = now;
+
+                                const progress = (totalBytes / CONFIG.DOWNLOAD_SIZE) * 100;
+                                setTestStatus('download', 'Testing...', Math.min(progress, 99));
+
+                                const elapsedTime = (now - startTime) / 1000;
+                                const bitsReceived = totalBytes * 8;
+                                const currentSpeed = bitsReceived / elapsedTime;
+
+                                elements.downloadResult.innerHTML = `${formatSpeed(currentSpeed)}<span class="result-unit">Mbps</span>`;
+                                elements.downloadData.textContent = `Data used: ${formatBytes(totalBytes)}`;
+                            }
+                        }
+
+                        return bytesReceived;
+                    })();
+
+                    downloadPromises.push(promise);
                 }
 
-                const reader = response.body.getReader();
-                const contentLength = parseInt(response.headers.get('Content-Length') || CONFIG.DOWNLOAD_SIZE);
-
-                let receivedBytes = 0;
-
-                while (true) {
-                    const { done, value } = await reader.read();
-
-                    if (done) break;
-
-                    receivedBytes += value.length;
-                    totalBytes += value.length;
-
-                    // Update progress
-                    const progress = (receivedBytes / contentLength) * 100;
-                    setTestStatus('download', 'Testing...', progress);
-
-                    // Calculate current speed
-                    const elapsedTime = (performance.now() - startTime) / 1000; // in seconds
-                    const bitsReceived = receivedBytes * 8;
-                    const currentSpeed = bitsReceived / elapsedTime;
-
-                    elements.downloadResult.innerHTML = `${formatSpeed(currentSpeed)}<span class="result-unit">Mbps</span>`;
-                    elements.downloadData.textContent = `Data used: ${formatBytes(receivedBytes)}`;
-                }
+                // Wait for all downloads to complete
+                await Promise.all(downloadPromises);
 
                 const endTime = performance.now();
                 const duration = (endTime - startTime) / 1000; // in seconds
@@ -517,13 +537,15 @@
             }
         }
 
-        // Upload Test
+        // Upload Test - Using multiple parallel connections for maximum speed
         async function testUpload() {
             setTestStatus('upload', 'Testing...', 0);
 
+            const numConnections = 4; // Use 4 parallel connections
+            const sizePerConnection = Math.floor(CONFIG.UPLOAD_SIZE / numConnections);
+
             // Generate random data in chunks to avoid crypto API limits
-            // crypto.getRandomValues() has a max limit of 65536 bytes
-            const uploadData = new Uint8Array(CONFIG.UPLOAD_SIZE);
+            const uploadData = new Uint8Array(sizePerConnection);
             const chunkSize = 65536; // 64KB chunks (max for crypto API)
 
             for (let i = 0; i < uploadData.length; i += chunkSize) {
@@ -533,46 +555,71 @@
             }
 
             const startTime = performance.now();
+            let totalBytesUploaded = 0;
+            let lastUpdateTime = startTime;
+            const updateInterval = 100; // Update UI every 100ms
 
             try {
-                // Use XMLHttpRequest for upload progress tracking
-                const uploadSpeed = await new Promise((resolve, reject) => {
-                    const xhr = new XMLHttpRequest();
+                // Create multiple parallel upload promises
+                const uploadPromises = [];
 
-                    xhr.upload.addEventListener('progress', (event) => {
-                        if (event.lengthComputable) {
-                            const progress = (event.loaded / event.total) * 100;
-                            setTestStatus('upload', 'Testing...', progress);
+                for (let i = 0; i < numConnections; i++) {
+                    const promise = new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        let connectionBytes = 0;
 
-                            const elapsedTime = (performance.now() - startTime) / 1000;
-                            const bitsUploaded = event.loaded * 8;
-                            const currentSpeed = bitsUploaded / elapsedTime;
+                        xhr.upload.addEventListener('progress', (event) => {
+                            if (event.lengthComputable) {
+                                // Update total bytes
+                                const byteDiff = event.loaded - connectionBytes;
+                                connectionBytes = event.loaded;
+                                totalBytesUploaded += byteDiff;
 
-                            elements.uploadResult.innerHTML = `${formatSpeed(currentSpeed)}<span class="result-unit">Mbps</span>`;
-                            elements.uploadData.textContent = `Data used: ${formatBytes(event.loaded)}`;
-                        }
+                                // Throttle UI updates
+                                const now = performance.now();
+                                if (now - lastUpdateTime > updateInterval) {
+                                    lastUpdateTime = now;
+
+                                    const progress = (totalBytesUploaded / CONFIG.UPLOAD_SIZE) * 100;
+                                    setTestStatus('upload', 'Testing...', Math.min(progress, 99));
+
+                                    const elapsedTime = (now - startTime) / 1000;
+                                    const bitsUploaded = totalBytesUploaded * 8;
+                                    const currentSpeed = bitsUploaded / elapsedTime;
+
+                                    elements.uploadResult.innerHTML = `${formatSpeed(currentSpeed)}<span class="result-unit">Mbps</span>`;
+                                    elements.uploadData.textContent = `Data used: ${formatBytes(totalBytesUploaded)}`;
+                                }
+                            }
+                        });
+
+                        xhr.addEventListener('load', () => {
+                            if (xhr.status >= 200 && xhr.status < 300) {
+                                resolve(sizePerConnection);
+                            } else {
+                                reject(new Error(`Upload failed with status ${xhr.status}`));
+                            }
+                        });
+
+                        xhr.addEventListener('error', () => {
+                            reject(new Error('Upload request failed'));
+                        });
+
+                        xhr.open('POST', `${serverUrl}/upload`);
+                        xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+                        xhr.send(uploadData);
                     });
 
-                    xhr.addEventListener('load', () => {
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            const endTime = performance.now();
-                            const duration = (endTime - startTime) / 1000;
-                            const bitsUploaded = CONFIG.UPLOAD_SIZE * 8;
-                            const uploadSpeed = bitsUploaded / duration;
-                            resolve(uploadSpeed);
-                        } else {
-                            reject(new Error(`Upload failed with status ${xhr.status}`));
-                        }
-                    });
+                    uploadPromises.push(promise);
+                }
 
-                    xhr.addEventListener('error', () => {
-                        reject(new Error('Upload request failed'));
-                    });
+                // Wait for all uploads to complete
+                await Promise.all(uploadPromises);
 
-                    xhr.open('POST', `${serverUrl}/upload`);
-                    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-                    xhr.send(uploadData);
-                });
+                const endTime = performance.now();
+                const duration = (endTime - startTime) / 1000;
+                const bitsUploaded = CONFIG.UPLOAD_SIZE * 8;
+                const uploadSpeed = bitsUploaded / duration;
 
                 testResults.upload = uploadSpeed / (1024 * 1024); // Convert to Mbps
                 testResults.uploadData = CONFIG.UPLOAD_SIZE;
