@@ -61,11 +61,11 @@ func init() {
 
 // downloadHandler generates random data for download speed testing
 // Query parameters:
-//   - size: number of bytes to download (default: 10MB chunks)
+//   - size: number of bytes to download (default: 100MB, client will abort when done)
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse size parameter (in bytes)
 	sizeStr := r.URL.Query().Get("size")
-	size := 10 * 1024 * 1024 // Default 10MB chunks for dynamic testing
+	size := 100 * 1024 * 1024 // Default 100MB
 
 	if sizeStr != "" {
 		if parsedSize, err := strconv.Atoi(sizeStr); err == nil && parsedSize > 0 {
@@ -73,9 +73,10 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Limit maximum size to prevent abuse (100MB per request)
-	if size > 100*1024*1024 {
-		size = 100 * 1024 * 1024
+	// Limit maximum size to prevent abuse (2GB per request, client aborts when stable)
+	maxSize := 2 * 1024 * 1024 * 1024
+	if size > maxSize {
+		size = maxSize
 	}
 
 	// Set headers

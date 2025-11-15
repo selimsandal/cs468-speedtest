@@ -274,7 +274,8 @@
         const CONFIG = {
             PING_COUNT: 5,                    // Number of ping tests to average
             PARALLEL_CONNECTIONS: 8,          // Parallel connections for better saturation
-            CHUNK_SIZE: 10 * 1024 * 1024,     // 10 MB chunks per request
+            STREAM_SIZE: 1024 * 1024 * 1024,  // 1 GB continuous stream (will be aborted when stable)
+            UPLOAD_BUFFER_SIZE: 50 * 1024 * 1024,  // 50 MB upload buffer per request
             MIN_TEST_DURATION: 2000,          // Minimum 2 seconds of testing
             MAX_TEST_DURATION: 20000,         // Maximum 20 seconds to prevent hanging
             STABILIZATION_WINDOW: 8,          // Number of measurements to check for stability
@@ -448,46 +449,45 @@
             setTestStatus('download', 'Testing...', 0);
 
             const startTime = performance.now();
-            let totalBytes = 0;
             let speedHistory = [];
             let lastMeasurementTime = startTime;
-            let testComplete = false;
-            let activeConnections = 0;
+
+            // Shared state for all connections
+            const state = {
+                totalBytes: 0,
+                shouldStop: false
+            };
+
+            // AbortController to cancel all requests immediately
+            const abortController = new AbortController();
+            let monitorInterval = null;
 
             try {
-                // Shared state for all connections
-                const state = {
-                    totalBytes: 0,
-                    shouldStop: false
-                };
-
-                // Function to download chunks continuously
+                // Function to stream continuous download
                 const downloadWorker = async () => {
-                    activeConnections++;
                     try {
-                        while (!state.shouldStop) {
-                            const response = await fetch(`${serverUrl}/download?size=${CONFIG.CHUNK_SIZE}`, {
-                                method: 'GET',
-                                cache: 'no-cache'
-                            });
+                        const response = await fetch(`${serverUrl}/download?size=${CONFIG.STREAM_SIZE}`, {
+                            method: 'GET',
+                            cache: 'no-cache',
+                            signal: abortController.signal
+                        });
 
-                            if (!response.ok) {
-                                throw new Error(`Download failed with status ${response.status}`);
-                            }
-
-                            const reader = response.body.getReader();
-
-                            while (true) {
-                                const { done, value } = await reader.read();
-                                if (done || state.shouldStop) break;
-
-                                state.totalBytes += value.length;
-                            }
-
-                            if (state.shouldStop) break;
+                        if (!response.ok) {
+                            throw new Error(`Download failed with status ${response.status}`);
                         }
-                    } finally {
-                        activeConnections--;
+
+                        const reader = response.body.getReader();
+
+                        while (!state.shouldStop) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            state.totalBytes += value.length;
+                        }
+                    } catch (error) {
+                        if (error.name === 'AbortError' || state.shouldStop) {
+                            return;
+                        }
+                        throw error;
                     }
                 };
 
@@ -498,7 +498,7 @@
                 }
 
                 // Monitor progress and check for stabilization
-                const monitorInterval = setInterval(() => {
+                monitorInterval = setInterval(() => {
                     const now = performance.now();
                     const elapsed = (now - startTime) / 1000;
                     const currentBytes = state.totalBytes;
@@ -523,13 +523,22 @@
 
                         if ((hasMinDuration && isStable) || hasMaxDuration) {
                             state.shouldStop = true;
+                            abortController.abort();
                             clearInterval(monitorInterval);
                         }
                     }
                 }, 50); // Check every 50ms
 
-                // Wait for workers to complete
-                await Promise.all(workers);
+                // Wait for workers to complete with timeout protection
+                await Promise.race([
+                    Promise.all(workers),
+                    new Promise((resolve) => setTimeout(resolve, CONFIG.MAX_TEST_DURATION + 2000))
+                ]);
+
+                // Ensure cleanup
+                if (monitorInterval) clearInterval(monitorInterval);
+                state.shouldStop = true;
+                abortController.abort();
 
                 const endTime = performance.now();
                 const duration = (endTime - startTime) / 1000;
@@ -554,33 +563,37 @@
             setTestStatus('upload', 'Testing...', 0);
 
             // Pre-generate upload buffer once (reuse for all connections)
-            // Use a simple pattern instead of crypto for speed
-            const uploadBuffer = new Uint8Array(CONFIG.CHUNK_SIZE);
+            const uploadBuffer = new Uint8Array(CONFIG.UPLOAD_BUFFER_SIZE);
             for (let i = 0; i < uploadBuffer.length; i++) {
-                uploadBuffer[i] = i & 0xFF; // Simple repeating pattern
+                uploadBuffer[i] = i & 0xFF;
             }
 
             const startTime = performance.now();
             let speedHistory = [];
             let lastMeasurementTime = startTime;
 
-            try {
-                // Shared state for all connections
-                const state = {
-                    totalBytes: 0,
-                    shouldStop: false
-                };
+            // Shared state for all connections
+            const state = {
+                totalBytes: 0,
+                shouldStop: false,
+                activeUploads: []
+            };
 
-                // Function to upload chunks continuously
+            let monitorInterval = null;
+
+            try {
+                // Function to upload continuously
                 const uploadWorker = async () => {
                     while (!state.shouldStop) {
                         try {
-                            const bytesUploaded = await new Promise((resolve, reject) => {
-                                const xhr = new XMLHttpRequest();
+                            const xhr = new XMLHttpRequest();
+                            state.activeUploads.push(xhr);
+
+                            const uploadPromise = new Promise((resolve, reject) => {
                                 let lastLoaded = 0;
 
                                 xhr.upload.addEventListener('progress', (event) => {
-                                    if (event.lengthComputable) {
+                                    if (event.lengthComputable && !state.shouldStop) {
                                         const byteDiff = event.loaded - lastLoaded;
                                         lastLoaded = event.loaded;
                                         state.totalBytes += byteDiff;
@@ -588,15 +601,22 @@
                                 });
 
                                 xhr.addEventListener('load', () => {
+                                    state.activeUploads = state.activeUploads.filter(x => x !== xhr);
                                     if (xhr.status >= 200 && xhr.status < 300) {
-                                        resolve(uploadBuffer.length);
+                                        resolve();
                                     } else {
                                         reject(new Error(`Upload failed with status ${xhr.status}`));
                                     }
                                 });
 
                                 xhr.addEventListener('error', () => {
+                                    state.activeUploads = state.activeUploads.filter(x => x !== xhr);
                                     reject(new Error('Upload request failed'));
+                                });
+
+                                xhr.addEventListener('abort', () => {
+                                    state.activeUploads = state.activeUploads.filter(x => x !== xhr);
+                                    resolve();
                                 });
 
                                 xhr.open('POST', `${serverUrl}/upload`);
@@ -604,11 +624,12 @@
                                 xhr.send(uploadBuffer);
                             });
 
+                            await uploadPromise;
                             if (state.shouldStop) break;
+
                         } catch (error) {
-                            if (!state.shouldStop) {
-                                throw error;
-                            }
+                            if (state.shouldStop) break;
+                            throw error;
                         }
                     }
                 };
@@ -620,7 +641,7 @@
                 }
 
                 // Monitor progress and check for stabilization
-                const monitorInterval = setInterval(() => {
+                monitorInterval = setInterval(() => {
                     const now = performance.now();
                     const elapsed = (now - startTime) / 1000;
                     const currentBytes = state.totalBytes;
@@ -645,13 +666,22 @@
 
                         if ((hasMinDuration && isStable) || hasMaxDuration) {
                             state.shouldStop = true;
+                            state.activeUploads.forEach(xhr => xhr.abort());
                             clearInterval(monitorInterval);
                         }
                     }
                 }, 50); // Check every 50ms
 
-                // Wait for workers to complete
-                await Promise.all(workers);
+                // Wait for workers to complete with timeout protection
+                await Promise.race([
+                    Promise.all(workers),
+                    new Promise((resolve) => setTimeout(resolve, CONFIG.MAX_TEST_DURATION + 2000))
+                ]);
+
+                // Ensure cleanup
+                if (monitorInterval) clearInterval(monitorInterval);
+                state.shouldStop = true;
+                state.activeUploads.forEach(xhr => xhr.abort());
 
                 const endTime = performance.now();
                 const duration = (endTime - startTime) / 1000;
