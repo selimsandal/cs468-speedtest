@@ -2,6 +2,8 @@
 
 Web-based network speed testing tool measuring ping, download, and upload speeds.
 
+**Live Demo:** https://speedtest.selimsandal.com
+
 ## Features
 
 - Ping/latency measurement (RTT averaging)
