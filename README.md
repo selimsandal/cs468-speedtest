@@ -51,13 +51,17 @@ The setup script installs dependencies, builds the application, configures syste
 Edit `index.html` to modify test parameters:
 
 ```javascript
-const CONFIG = {
-    PING_COUNT: 5,                    // Number of ping samples
-    DOWNLOAD_SIZE: 50 * 1024 * 1024,  // 50MB
-    UPLOAD_SIZE: 25 * 1024 * 1024,    // 25MB
-    DOWNLOAD_DURATION: 10000,         // 10 seconds
-    UPLOAD_DURATION: 10000            // 10 seconds
-};
+        const CONFIG = {
+            PING_COUNT: 5,                    // Number of ping tests to average
+            PARALLEL_CONNECTIONS: 8,          // Parallel connections for better saturation
+            STREAM_SIZE: 1024 * 1024 * 1024,  // 1 GB continuous stream (will be aborted when stable)
+            UPLOAD_BUFFER_SIZE: 50 * 1024 * 1024,  // 50 MB upload buffer per request
+            MIN_TEST_DURATION: 2000,          // Minimum 2 seconds of testing
+            MAX_TEST_DURATION: 20000,         // Maximum 20 seconds to prevent hanging
+            STABILIZATION_WINDOW: 8,          // Number of measurements to check for stability
+            STABILIZATION_THRESHOLD: 0.05,    // 5% coefficient of variation for stability
+            MEASUREMENT_INTERVAL: 250         // Take speed measurement every 250ms
+        };
 ```
 
 ## Technical Implementation
