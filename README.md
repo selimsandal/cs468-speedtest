@@ -71,14 +71,14 @@ Edit `index.html` to modify test parameters:
 - Standard `net/http` library
 - Pre-generated random data buffer (1MB) for performance
 - CORS middleware for cross-origin requests
-- Streaming transfers with 1MB chunks
+- Streaming transfers with 256KB write buffer
 - TCP optimizations: 1MB buffers, TCP_NODELAY enabled, keep-alive configured
 - 30s read/write timeouts, 120s idle timeout
 
 ### Frontend (JavaScript)
 
 - Vanilla JavaScript, zero dependencies
-- 4 parallel connections for download/upload to saturate bandwidth
+- 8 parallel connections for download/upload to saturate bandwidth
 - `fetch` API with ReadableStream for downloads
 - `XMLHttpRequest` for uploads (progress tracking)
 - Throttled UI updates (100ms intervals)
@@ -86,7 +86,7 @@ Edit `index.html` to modify test parameters:
 
 ### Speed Calculation
 
-- Download/Upload: Total bits transferred / elapsed time (4 parallel connections)
+- Download/Upload: Total bits transferred / elapsed time (8 parallel connections)
 - Ping: Average RTT over 5 samples
 - Units: Mbps (Megabits per second)
 
