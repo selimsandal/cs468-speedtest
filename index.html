@@ -270,13 +270,16 @@
     </div>
 
     <script>
-        // Configuration
+        // Configuration - Dynamic testing with stabilization detection
         const CONFIG = {
             PING_COUNT: 5,                    // Number of ping tests to average
-            DOWNLOAD_SIZE: 250 * 1024 * 1024,  // 250 MB download
-            UPLOAD_SIZE: 125 * 1024 * 1024,    // 125 MB upload
-            DOWNLOAD_DURATION: 10000,         // Target 10 seconds for download
-            UPLOAD_DURATION: 10000            // Target 10 seconds for upload
+            PARALLEL_CONNECTIONS: 8,          // Parallel connections for better saturation
+            CHUNK_SIZE: 10 * 1024 * 1024,     // 10 MB chunks per request
+            MIN_TEST_DURATION: 2000,          // Minimum 2 seconds of testing
+            MAX_TEST_DURATION: 20000,         // Maximum 20 seconds to prevent hanging
+            STABILIZATION_WINDOW: 8,          // Number of measurements to check for stability
+            STABILIZATION_THRESHOLD: 0.05,    // 5% coefficient of variation for stability
+            MEASUREMENT_INTERVAL: 250         // Take speed measurement every 250ms
         };
 
         // State
@@ -322,6 +325,29 @@
         function formatSpeed(bitsPerSecond) {
             const mbps = bitsPerSecond / (1024 * 1024);
             return mbps.toFixed(2);
+        }
+
+        // Speed stabilization detection
+        function isSpeedStable(speedHistory) {
+            if (speedHistory.length < CONFIG.STABILIZATION_WINDOW) {
+                return false;
+            }
+
+            // Get last N measurements
+            const recent = speedHistory.slice(-CONFIG.STABILIZATION_WINDOW);
+
+            // Calculate mean
+            const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+
+            // Calculate standard deviation
+            const variance = recent.reduce((sum, speed) => sum + Math.pow(speed - mean, 2), 0) / recent.length;
+            const stdDev = Math.sqrt(variance);
+
+            // Calculate coefficient of variation (CV)
+            const cv = stdDev / mean;
+
+            // Speed is stable if CV is below threshold
+            return cv < CONFIG.STABILIZATION_THRESHOLD;
         }
 
         function showError(message) {
@@ -417,179 +443,229 @@
             return averagePing;
         }
 
-        // Download Test - Using multiple parallel connections for maximum speed
+        // Download Test - Dynamic with stabilization detection
         async function testDownload() {
             setTestStatus('download', 'Testing...', 0);
 
             const startTime = performance.now();
-            const numConnections = 4; // Use 4 parallel connections
-            const sizePerConnection = Math.floor(CONFIG.DOWNLOAD_SIZE / numConnections);
-
             let totalBytes = 0;
-            let lastUpdateTime = startTime;
-            const updateInterval = 100; // Update UI every 100ms
+            let speedHistory = [];
+            let lastMeasurementTime = startTime;
+            let testComplete = false;
+            let activeConnections = 0;
 
             try {
-                // Create multiple parallel download promises
-                const downloadPromises = [];
+                // Shared state for all connections
+                const state = {
+                    totalBytes: 0,
+                    shouldStop: false
+                };
 
-                for (let i = 0; i < numConnections; i++) {
-                    const promise = (async () => {
-                        const response = await fetch(`${serverUrl}/download?size=${sizePerConnection}`, {
-                            method: 'GET',
-                            cache: 'no-cache'
-                        });
+                // Function to download chunks continuously
+                const downloadWorker = async () => {
+                    activeConnections++;
+                    try {
+                        while (!state.shouldStop) {
+                            const response = await fetch(`${serverUrl}/download?size=${CONFIG.CHUNK_SIZE}`, {
+                                method: 'GET',
+                                cache: 'no-cache'
+                            });
 
-                        if (!response.ok) {
-                            throw new Error(`Download failed with status ${response.status}`);
-                        }
-
-                        const reader = response.body.getReader();
-                        let bytesReceived = 0;
-
-                        while (true) {
-                            const { done, value } = await reader.read();
-                            if (done) break;
-
-                            bytesReceived += value.length;
-                            totalBytes += value.length;
-
-                            // Throttle UI updates to improve performance
-                            const now = performance.now();
-                            if (now - lastUpdateTime > updateInterval) {
-                                lastUpdateTime = now;
-
-                                const progress = (totalBytes / CONFIG.DOWNLOAD_SIZE) * 100;
-                                setTestStatus('download', 'Testing...', Math.min(progress, 99));
-
-                                const elapsedTime = (now - startTime) / 1000;
-                                const bitsReceived = totalBytes * 8;
-                                const currentSpeed = bitsReceived / elapsedTime;
-
-                                elements.downloadResult.innerHTML = `${formatSpeed(currentSpeed)}<span class="result-unit">Mbps</span>`;
-                                elements.downloadData.textContent = `Data used: ${formatBytes(totalBytes)}`;
+                            if (!response.ok) {
+                                throw new Error(`Download failed with status ${response.status}`);
                             }
+
+                            const reader = response.body.getReader();
+
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done || state.shouldStop) break;
+
+                                state.totalBytes += value.length;
+                            }
+
+                            if (state.shouldStop) break;
                         }
+                    } finally {
+                        activeConnections--;
+                    }
+                };
 
-                        return bytesReceived;
-                    })();
-
-                    downloadPromises.push(promise);
+                // Start parallel download workers
+                const workers = [];
+                for (let i = 0; i < CONFIG.PARALLEL_CONNECTIONS; i++) {
+                    workers.push(downloadWorker());
                 }
 
-                // Wait for all downloads to complete
-                await Promise.all(downloadPromises);
+                // Monitor progress and check for stabilization
+                const monitorInterval = setInterval(() => {
+                    const now = performance.now();
+                    const elapsed = (now - startTime) / 1000;
+                    const currentBytes = state.totalBytes;
+                    const bits = currentBytes * 8;
+                    const currentSpeed = bits / elapsed;
+
+                    // Record speed measurement
+                    if (now - lastMeasurementTime >= CONFIG.MEASUREMENT_INTERVAL) {
+                        speedHistory.push(currentSpeed);
+                        lastMeasurementTime = now;
+
+                        // Update UI
+                        const progress = Math.min((elapsed / CONFIG.MIN_TEST_DURATION) * 100, 99);
+                        setTestStatus('download', 'Testing...', progress);
+                        elements.downloadResult.innerHTML = `${formatSpeed(currentSpeed)}<span class="result-unit">Mbps</span>`;
+                        elements.downloadData.textContent = `Data used: ${formatBytes(currentBytes)}`;
+
+                        // Check if we should stop
+                        const hasMinDuration = elapsed >= CONFIG.MIN_TEST_DURATION / 1000;
+                        const hasMaxDuration = elapsed >= CONFIG.MAX_TEST_DURATION / 1000;
+                        const isStable = isSpeedStable(speedHistory);
+
+                        if ((hasMinDuration && isStable) || hasMaxDuration) {
+                            state.shouldStop = true;
+                            clearInterval(monitorInterval);
+                        }
+                    }
+                }, 50); // Check every 50ms
+
+                // Wait for workers to complete
+                await Promise.all(workers);
 
                 const endTime = performance.now();
-                const duration = (endTime - startTime) / 1000; // in seconds
-                const bitsDownloaded = totalBytes * 8;
-                const downloadSpeed = bitsDownloaded / duration;
+                const duration = (endTime - startTime) / 1000;
+                const totalBitsDownloaded = state.totalBytes * 8;
+                const finalSpeed = totalBitsDownloaded / duration;
 
-                testResults.download = downloadSpeed / (1024 * 1024); // Convert to Mbps
-                testResults.downloadData = totalBytes;
+                testResults.download = finalSpeed / (1024 * 1024);
+                testResults.downloadData = state.totalBytes;
 
-                elements.downloadResult.innerHTML = `${formatSpeed(downloadSpeed)}<span class="result-unit">Mbps</span>`;
-                elements.downloadData.textContent = `Data used: ${formatBytes(totalBytes)}`;
+                elements.downloadResult.innerHTML = `${formatSpeed(finalSpeed)}<span class="result-unit">Mbps</span>`;
+                elements.downloadData.textContent = `Data used: ${formatBytes(state.totalBytes)}`;
                 setTestStatus('download', 'Completed', 100);
 
-                return downloadSpeed;
+                return finalSpeed;
             } catch (error) {
                 throw new Error(`Download test failed: ${error.message}`);
             }
         }
 
-        // Upload Test - Using multiple parallel connections for maximum speed
+        // Upload Test - Dynamic with stabilization detection and optimized data generation
         async function testUpload() {
             setTestStatus('upload', 'Testing...', 0);
 
-            const numConnections = 4; // Use 4 parallel connections
-            const sizePerConnection = Math.floor(CONFIG.UPLOAD_SIZE / numConnections);
-
-            // Generate random data in chunks to avoid crypto API limits
-            const uploadData = new Uint8Array(sizePerConnection);
-            const chunkSize = 65536; // 64KB chunks (max for crypto API)
-
-            for (let i = 0; i < uploadData.length; i += chunkSize) {
-                const end = Math.min(i + chunkSize, uploadData.length);
-                const chunk = uploadData.subarray(i, end);
-                crypto.getRandomValues(chunk);
+            // Pre-generate upload buffer once (reuse for all connections)
+            // Use a simple pattern instead of crypto for speed
+            const uploadBuffer = new Uint8Array(CONFIG.CHUNK_SIZE);
+            for (let i = 0; i < uploadBuffer.length; i++) {
+                uploadBuffer[i] = i & 0xFF; // Simple repeating pattern
             }
 
             const startTime = performance.now();
-            let totalBytesUploaded = 0;
-            let lastUpdateTime = startTime;
-            const updateInterval = 100; // Update UI every 100ms
+            let speedHistory = [];
+            let lastMeasurementTime = startTime;
 
             try {
-                // Create multiple parallel upload promises
-                const uploadPromises = [];
+                // Shared state for all connections
+                const state = {
+                    totalBytes: 0,
+                    shouldStop: false
+                };
 
-                for (let i = 0; i < numConnections; i++) {
-                    const promise = new Promise((resolve, reject) => {
-                        const xhr = new XMLHttpRequest();
-                        let connectionBytes = 0;
+                // Function to upload chunks continuously
+                const uploadWorker = async () => {
+                    while (!state.shouldStop) {
+                        try {
+                            const bytesUploaded = await new Promise((resolve, reject) => {
+                                const xhr = new XMLHttpRequest();
+                                let lastLoaded = 0;
 
-                        xhr.upload.addEventListener('progress', (event) => {
-                            if (event.lengthComputable) {
-                                // Update total bytes
-                                const byteDiff = event.loaded - connectionBytes;
-                                connectionBytes = event.loaded;
-                                totalBytesUploaded += byteDiff;
+                                xhr.upload.addEventListener('progress', (event) => {
+                                    if (event.lengthComputable) {
+                                        const byteDiff = event.loaded - lastLoaded;
+                                        lastLoaded = event.loaded;
+                                        state.totalBytes += byteDiff;
+                                    }
+                                });
 
-                                // Throttle UI updates
-                                const now = performance.now();
-                                if (now - lastUpdateTime > updateInterval) {
-                                    lastUpdateTime = now;
+                                xhr.addEventListener('load', () => {
+                                    if (xhr.status >= 200 && xhr.status < 300) {
+                                        resolve(uploadBuffer.length);
+                                    } else {
+                                        reject(new Error(`Upload failed with status ${xhr.status}`));
+                                    }
+                                });
 
-                                    const progress = (totalBytesUploaded / CONFIG.UPLOAD_SIZE) * 100;
-                                    setTestStatus('upload', 'Testing...', Math.min(progress, 99));
+                                xhr.addEventListener('error', () => {
+                                    reject(new Error('Upload request failed'));
+                                });
 
-                                    const elapsedTime = (now - startTime) / 1000;
-                                    const bitsUploaded = totalBytesUploaded * 8;
-                                    const currentSpeed = bitsUploaded / elapsedTime;
+                                xhr.open('POST', `${serverUrl}/upload`);
+                                xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+                                xhr.send(uploadBuffer);
+                            });
 
-                                    elements.uploadResult.innerHTML = `${formatSpeed(currentSpeed)}<span class="result-unit">Mbps</span>`;
-                                    elements.uploadData.textContent = `Data used: ${formatBytes(totalBytesUploaded)}`;
-                                }
+                            if (state.shouldStop) break;
+                        } catch (error) {
+                            if (!state.shouldStop) {
+                                throw error;
                             }
-                        });
+                        }
+                    }
+                };
 
-                        xhr.addEventListener('load', () => {
-                            if (xhr.status >= 200 && xhr.status < 300) {
-                                resolve(sizePerConnection);
-                            } else {
-                                reject(new Error(`Upload failed with status ${xhr.status}`));
-                            }
-                        });
-
-                        xhr.addEventListener('error', () => {
-                            reject(new Error('Upload request failed'));
-                        });
-
-                        xhr.open('POST', `${serverUrl}/upload`);
-                        xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-                        xhr.send(uploadData);
-                    });
-
-                    uploadPromises.push(promise);
+                // Start parallel upload workers
+                const workers = [];
+                for (let i = 0; i < CONFIG.PARALLEL_CONNECTIONS; i++) {
+                    workers.push(uploadWorker());
                 }
 
-                // Wait for all uploads to complete
-                await Promise.all(uploadPromises);
+                // Monitor progress and check for stabilization
+                const monitorInterval = setInterval(() => {
+                    const now = performance.now();
+                    const elapsed = (now - startTime) / 1000;
+                    const currentBytes = state.totalBytes;
+                    const bits = currentBytes * 8;
+                    const currentSpeed = bits / elapsed;
+
+                    // Record speed measurement
+                    if (now - lastMeasurementTime >= CONFIG.MEASUREMENT_INTERVAL) {
+                        speedHistory.push(currentSpeed);
+                        lastMeasurementTime = now;
+
+                        // Update UI
+                        const progress = Math.min((elapsed / CONFIG.MIN_TEST_DURATION) * 100, 99);
+                        setTestStatus('upload', 'Testing...', progress);
+                        elements.uploadResult.innerHTML = `${formatSpeed(currentSpeed)}<span class="result-unit">Mbps</span>`;
+                        elements.uploadData.textContent = `Data used: ${formatBytes(currentBytes)}`;
+
+                        // Check if we should stop
+                        const hasMinDuration = elapsed >= CONFIG.MIN_TEST_DURATION / 1000;
+                        const hasMaxDuration = elapsed >= CONFIG.MAX_TEST_DURATION / 1000;
+                        const isStable = isSpeedStable(speedHistory);
+
+                        if ((hasMinDuration && isStable) || hasMaxDuration) {
+                            state.shouldStop = true;
+                            clearInterval(monitorInterval);
+                        }
+                    }
+                }, 50); // Check every 50ms
+
+                // Wait for workers to complete
+                await Promise.all(workers);
 
                 const endTime = performance.now();
                 const duration = (endTime - startTime) / 1000;
-                const bitsUploaded = CONFIG.UPLOAD_SIZE * 8;
-                const uploadSpeed = bitsUploaded / duration;
+                const totalBitsUploaded = state.totalBytes * 8;
+                const finalSpeed = totalBitsUploaded / duration;
 
-                testResults.upload = uploadSpeed / (1024 * 1024); // Convert to Mbps
-                testResults.uploadData = CONFIG.UPLOAD_SIZE;
+                testResults.upload = finalSpeed / (1024 * 1024);
+                testResults.uploadData = state.totalBytes;
 
-                elements.uploadResult.innerHTML = `${formatSpeed(uploadSpeed)}<span class="result-unit">Mbps</span>`;
-                elements.uploadData.textContent = `Data used: ${formatBytes(CONFIG.UPLOAD_SIZE)}`;
+                elements.uploadResult.innerHTML = `${formatSpeed(finalSpeed)}<span class="result-unit">Mbps</span>`;
+                elements.uploadData.textContent = `Data used: ${formatBytes(state.totalBytes)}`;
                 setTestStatus('upload', 'Completed', 100);
 
-                return uploadSpeed;
+                return finalSpeed;
             } catch (error) {
                 throw new Error(`Upload test failed: ${error.message}`);
             }
@@ -625,13 +701,9 @@
                     throw new Error('Cannot connect to server');
                 }
 
-                // Run tests sequentially
+                // Run tests sequentially without delays
                 await testPing();
-                await new Promise(resolve => setTimeout(resolve, 500)); // Small delay
-
                 await testDownload();
-                await new Promise(resolve => setTimeout(resolve, 500)); // Small delay
-
                 await testUpload();
 
                 // Show summary

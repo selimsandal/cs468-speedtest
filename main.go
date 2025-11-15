@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	mathrand "math/rand"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -59,11 +61,11 @@ func init() {
 
 // downloadHandler generates random data for download speed testing
 // Query parameters:
-//   - size: number of bytes to download (default: 250MB)
+//   - size: number of bytes to download (default: 10MB chunks)
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse size parameter (in bytes)
 	sizeStr := r.URL.Query().Get("size")
-	size := 250 * 1024 * 1024 // Default 250MB
+	size := 10 * 1024 * 1024 // Default 10MB chunks for dynamic testing
 
 	if sizeStr != "" {
 		if parsedSize, err := strconv.Atoi(sizeStr); err == nil && parsedSize > 0 {
@@ -71,15 +73,19 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Limit maximum size to prevent abuse (1000MB for better testing)
-	if size > 1000*1024*1024 {
-		size = 1000 * 1024 * 1024
+	// Limit maximum size to prevent abuse (100MB per request)
+	if size > 100*1024*1024 {
+		size = 100 * 1024 * 1024
 	}
 
 	// Set headers
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.Itoa(size))
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+	// Use buffered writer for better performance
+	bw := bufio.NewWriterSize(w, 256*1024) // 256KB buffer
+	defer bw.Flush()
 
 	// Send pre-generated random data in large chunks for maximum speed
 	bufferSize := len(randomDataBuffer)
@@ -88,14 +94,14 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	for remaining > 0 {
 		if remaining >= bufferSize {
 			// Send full buffer
-			if _, err := w.Write(randomDataBuffer); err != nil {
+			if _, err := bw.Write(randomDataBuffer); err != nil {
 				log.Printf("Error writing download data: %v", err)
 				return
 			}
 			remaining -= bufferSize
 		} else {
 			// Send remaining bytes
-			if _, err := w.Write(randomDataBuffer[:remaining]); err != nil {
+			if _, err := bw.Write(randomDataBuffer[:remaining]); err != nil {
 				log.Printf("Error writing download data: %v", err)
 				return
 			}
@@ -171,14 +177,56 @@ func main() {
 	fmt.Printf("\nAPI Endpoints:\n")
 	fmt.Printf("  GET  /           - Web interface\n")
 	fmt.Printf("  GET  /ping       - Latency test\n")
-	fmt.Printf("  GET  /download   - Download speed test\n")
-	fmt.Printf("  POST /upload     - Upload speed test\n")
+	fmt.Printf("  GET  /download   - Download speed test (dynamic)\n")
+	fmt.Printf("  POST /upload     - Upload speed test (dynamic)\n")
 	fmt.Printf("  GET  /health     - Health check\n")
 	fmt.Printf("========================================\n\n")
 
 	log.Printf("Server started successfully on port %s", port)
 
-	if err := http.ListenAndServe("0.0.0.0:"+port, nil); err != nil {
+	// Create optimized HTTP server with TCP tuning
+	server := &http.Server{
+		Addr:         "0.0.0.0:" + port,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	// Create custom listener with TCP optimizations
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
 		log.Fatal(err)
 	}
+
+	// Wrap listener to set TCP options
+	listener = &tcpKeepAliveListener{listener.(*net.TCPListener)}
+
+	if err := server.Serve(listener); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// tcpKeepAliveListener sets TCP keep-alive and buffer sizes for better performance
+type tcpKeepAliveListener struct {
+	*net.TCPListener
+}
+
+func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
+	tc, err := ln.AcceptTCP()
+	if err != nil {
+		return nil, err
+	}
+
+	// Enable TCP keep-alive
+	tc.SetKeepAlive(true)
+	tc.SetKeepAlivePeriod(3 * time.Minute)
+
+	// Set larger TCP buffers for better throughput (1MB each)
+	tc.SetReadBuffer(1024 * 1024)
+	tc.SetWriteBuffer(1024 * 1024)
+
+	// Disable Nagle's algorithm for lower latency
+	tc.SetNoDelay(true)
+
+	return tc, nil
 }
