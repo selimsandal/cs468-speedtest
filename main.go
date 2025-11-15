@@ -50,20 +50,27 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Pre-generate a large buffer of random data to avoid repeated generation
-// This is initialized once at startup for performance
+// This is initialized once at startup for performance.
+// We use math/rand instead of crypto/rand because:
+// 1. Speed testing doesn't require cryptographically secure randomness
+// 2. math/rand is significantly faster, improving throughput
+// 3. The data pattern doesn't affect speed measurement accuracy
 var randomDataBuffer []byte
 
 func init() {
-	// Generate 1MB of random data once (using math/rand for speed)
+	// Generate 1MB of random data once at startup
+	// This buffer is reused for all download requests to maximize performance
 	randomDataBuffer = make([]byte, 1024*1024)
 	mathrand.Read(randomDataBuffer)
 }
 
 // downloadHandler generates random data for download speed testing
+// The client requests a large stream size but will abort the connection
+// once speed stabilizes, minimizing actual data transferred.
 // Query parameters:
 //   - size: number of bytes to download (default: 100MB, client will abort when done)
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
-	// Parse size parameter (in bytes)
+	// Parse size parameter from query string (in bytes)
 	sizeStr := r.URL.Query().Get("size")
 	size := 100 * 1024 * 1024 // Default 100MB
 
@@ -73,19 +80,21 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Limit maximum size to prevent abuse (2GB per request, client aborts when stable)
-	maxSize := 2 * 1024 * 1024 * 1024
+	// Limit maximum size to prevent abuse
+	// Client will abort when speed stabilizes, so full size rarely transferred
+	maxSize := 2 * 1024 * 1024 * 1024 // 2GB max
 	if size > maxSize {
 		size = maxSize
 	}
 
-	// Set headers
+	// Set response headers
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.Itoa(size))
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate") // Prevent caching
 
-	// Use buffered writer for better performance
-	bw := bufio.NewWriterSize(w, 256*1024) // 256KB buffer
+	// Use buffered writer for better throughput
+	// Buffering reduces system calls and improves performance
+	bw := bufio.NewWriterSize(w, 256*1024) // 256KB write buffer
 	defer bw.Flush()
 
 	// Send pre-generated random data in large chunks for maximum speed
@@ -112,14 +121,17 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // uploadHandler receives data for upload speed testing
-// Simply reads and discards the data to measure upload speed
+// The actual data content doesn't matter - we just need to receive it
+// at maximum speed to measure the upload bandwidth accurately.
+// The data is discarded (not stored) as we only care about transfer rate.
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Read the entire request body and discard it
+	// Read the entire request body and discard it efficiently
+	// io.Discard is optimized for discarding data without allocating memory
 	bytesReceived, err := io.Copy(io.Discard, r.Body)
 	if err != nil {
 		http.Error(w, "Error reading upload data", http.StatusInternalServerError)
@@ -128,7 +140,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Send response with bytes received
+	// Send confirmation response with bytes received
+	// Client uses this to verify the upload completed successfully
 	response := map[string]interface{}{
 		"bytesReceived": bytesReceived,
 		"message":       "Upload successful",
@@ -185,21 +198,22 @@ func main() {
 
 	log.Printf("Server started successfully on port %s", port)
 
-	// Create optimized HTTP server with TCP tuning
+	// Create optimized HTTP server with appropriate timeouts
+	// These settings balance performance with resource management
 	server := &http.Server{
 		Addr:         "0.0.0.0:" + port,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  30 * time.Second,  // Prevent slow-read attacks
+		WriteTimeout: 30 * time.Second,  // Enough time for large transfers
+		IdleTimeout:  120 * time.Second, // Keep connections alive for reuse
 	}
 
-	// Create custom listener with TCP optimizations
+	// Create custom TCP listener with performance optimizations
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Wrap listener to set TCP options
+	// Wrap listener to apply TCP tuning to each accepted connection
 	listener = &tcpKeepAliveListener{listener.(*net.TCPListener)}
 
 	if err := server.Serve(listener); err != nil {
@@ -207,7 +221,9 @@ func main() {
 	}
 }
 
-// tcpKeepAliveListener sets TCP keep-alive and buffer sizes for better performance
+// tcpKeepAliveListener wraps the TCP listener to optimize each connection
+// for high-throughput speed testing. These optimizations are crucial for
+// achieving accurate speed measurements on high-bandwidth connections.
 type tcpKeepAliveListener struct {
 	*net.TCPListener
 }
@@ -218,15 +234,20 @@ func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
 		return nil, err
 	}
 
-	// Enable TCP keep-alive
+	// Enable TCP keep-alive to detect dead connections
+	// Helps clean up stale connections from aborted tests
 	tc.SetKeepAlive(true)
 	tc.SetKeepAlivePeriod(3 * time.Minute)
 
-	// Set larger TCP buffers for better throughput (1MB each)
-	tc.SetReadBuffer(1024 * 1024)
-	tc.SetWriteBuffer(1024 * 1024)
+	// Set larger TCP buffers for better throughput
+	// Default buffers are often too small for high-speed connections
+	// 1MB buffers allow TCP window to scale properly for high bandwidth-delay product
+	tc.SetReadBuffer(1024 * 1024)  // 1MB read buffer
+	tc.SetWriteBuffer(1024 * 1024) // 1MB write buffer
 
-	// Disable Nagle's algorithm for lower latency
+	// Disable Nagle's algorithm (TCP_NODELAY)
+	// Nagle's algorithm batches small writes, which increases latency
+	// For speed testing, we want data sent immediately for accurate measurements
 	tc.SetNoDelay(true)
 
 	return tc, nil

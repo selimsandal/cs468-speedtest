@@ -328,26 +328,33 @@
             return mbps.toFixed(2);
         }
 
-        // Speed stabilization detection
+        // Speed stabilization detection - core algorithm for minimizing data usage
+        // This function determines when to stop the test by detecting when speed has stabilized.
+        // Instead of transferring a fixed amount of data, we measure continuously and stop
+        // when the speed readings become consistent, minimizing both time and data spent.
         function isSpeedStable(speedHistory) {
+            // Need minimum number of samples before we can determine stability
             if (speedHistory.length < CONFIG.STABILIZATION_WINDOW) {
                 return false;
             }
 
-            // Get last N measurements
+            // Get last N measurements for stability analysis
             const recent = speedHistory.slice(-CONFIG.STABILIZATION_WINDOW);
 
-            // Calculate mean
+            // Calculate mean (average) speed
             const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
 
-            // Calculate standard deviation
+            // Calculate standard deviation (how much speeds vary from the mean)
             const variance = recent.reduce((sum, speed) => sum + Math.pow(speed - mean, 2), 0) / recent.length;
             const stdDev = Math.sqrt(variance);
 
-            // Calculate coefficient of variation (CV)
+            // Calculate coefficient of variation (CV = stdDev / mean)
+            // CV expresses variability as a percentage of the mean
+            // Lower CV = more stable/consistent measurements
             const cv = stdDev / mean;
 
-            // Speed is stable if CV is below threshold
+            // Speed is considered stable if CV is below our threshold (5%)
+            // This means recent measurements are within 5% of each other
             return cv < CONFIG.STABILIZATION_THRESHOLD;
         }
 
@@ -396,24 +403,33 @@
             hideError();
         }
 
-        // Ping Test
+        // Ping Test - Measures Round Trip Time (RTT) latency
+        // This test measures how long it takes for a request to reach the server and return.
+        // We perform multiple measurements and average them for accuracy.
         async function testPing() {
             setTestStatus('ping', 'Testing...', 0);
             const pingTimes = [];
 
+            // Perform multiple ping tests and average them
             for (let i = 0; i < CONFIG.PING_COUNT; i++) {
                 try {
+                    // Record time before sending request
                     const startTime = performance.now();
+
+                    // Send minimal request to server
                     const response = await fetch(`${serverUrl}/ping`, {
                         method: 'GET',
-                        cache: 'no-cache'
+                        cache: 'no-cache'  // Ensure fresh request, no caching
                     });
+
+                    // Record time after receiving response
                     const endTime = performance.now();
 
                     if (!response.ok) {
                         throw new Error(`Ping failed with status ${response.status}`);
                     }
 
+                    // Calculate Round Trip Time (RTT) in milliseconds
                     const rtt = endTime - startTime;
                     pingTimes.push(rtt);
 
@@ -445,6 +461,10 @@
         }
 
         // Download Test - Dynamic with stabilization detection
+        // This test downloads data from the server using multiple parallel connections.
+        // Instead of downloading a fixed amount, it streams continuously and stops
+        // automatically when the speed stabilizes, minimizing data usage.
+        // Speed = (total bits received) / (time elapsed)
         async function testDownload() {
             setTestStatus('download', 'Testing...', 0);
 
@@ -452,38 +472,46 @@
             let speedHistory = [];
             let lastMeasurementTime = startTime;
 
-            // Shared state for all connections
+            // Shared state for all parallel connections
             const state = {
-                totalBytes: 0,
-                shouldStop: false
+                totalBytes: 0,      // Track total bytes downloaded across all connections
+                shouldStop: false   // Signal to stop all workers
             };
 
-            // AbortController to cancel all requests immediately
+            // AbortController allows us to cancel in-flight HTTP requests immediately
+            // when stabilization is detected, preventing unnecessary data transfer
             const abortController = new AbortController();
             let monitorInterval = null;
 
             try {
-                // Function to stream continuous download
+                // Download worker - continuously streams data from server
+                // Each worker runs in parallel to saturate the available bandwidth
                 const downloadWorker = async () => {
                     try {
+                        // Request large continuous stream (will be aborted when speed stabilizes)
                         const response = await fetch(`${serverUrl}/download?size=${CONFIG.STREAM_SIZE}`, {
                             method: 'GET',
                             cache: 'no-cache',
-                            signal: abortController.signal
+                            signal: abortController.signal  // Allow aborting mid-stream
                         });
 
                         if (!response.ok) {
                             throw new Error(`Download failed with status ${response.status}`);
                         }
 
+                        // Read response body as a stream
                         const reader = response.body.getReader();
 
+                        // Continuously read chunks until stopped or stream ends
                         while (!state.shouldStop) {
                             const { done, value } = await reader.read();
                             if (done) break;
+
+                            // Accumulate bytes for speed calculation
                             state.totalBytes += value.length;
                         }
                     } catch (error) {
+                        // Ignore abort errors (expected when we stop the test)
                         if (error.name === 'AbortError' || state.shouldStop) {
                             return;
                         }
@@ -559,13 +587,20 @@
         }
 
         // Upload Test - Dynamic with stabilization detection and optimized data generation
+        // This test uploads data to the server using multiple parallel connections.
+        // Like the download test, it continues until speed stabilizes, minimizing data usage.
+        // Speed = (total bits sent) / (time elapsed)
         async function testUpload() {
             setTestStatus('upload', 'Testing...', 0);
 
-            // Pre-generate upload buffer once (reuse for all connections)
+            // Pre-generate upload buffer once and reuse for all connections
+            // We use a simple repeating pattern (not crypto random) for speed:
+            // - Faster generation means test starts quicker
+            // - Pattern doesn't affect upload speed measurement
+            // - Reduces CPU usage during test
             const uploadBuffer = new Uint8Array(CONFIG.UPLOAD_BUFFER_SIZE);
             for (let i = 0; i < uploadBuffer.length; i++) {
-                uploadBuffer[i] = i & 0xFF;
+                uploadBuffer[i] = i & 0xFF;  // Simple 0-255 repeating pattern
             }
 
             const startTime = performance.now();
