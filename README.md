@@ -1,195 +1,275 @@
 # Speed Test Application
 
-A web-based speed testing tool that measures network performance including ping/latency, download speed, and upload speed.
+Web-based network speed testing tool measuring ping, download, and upload speeds.
 
 ## Features
 
-- **Ping/Latency Test**: Measures round-trip time (RTT) to the server by averaging multiple ping requests
-- **Download Speed Test**: Measures download speed by fetching data from the server
-- **Upload Speed Test**: Measures upload speed by sending data to the server
-- **Data Usage Tracking**: Reports the exact amount of data downloaded and uploaded during tests
-- **Real-time Progress**: Visual progress bars and live speed updates during testing
-- **Responsive UI**: Clean, modern interface that works on all devices
+- Ping/latency measurement (RTT averaging)
+- Download speed test with parallel connections
+- Upload speed test with parallel connections
+- Real-time progress tracking
+- Data usage reporting
+- No external dependencies
 
-## Quick Deployment
+## Quick Start
 
-### VPS/Production (Automated)
-
-Deploy to any VPS with one command:
+### Local Development
 
 ```bash
-git clone <your-repo-url>
+go run main.go
+# Access at http://localhost:8080
+```
+
+### Production Deployment
+
+```bash
+git clone <repo-url>
 cd cs468-speedtest
 ./setup.sh
 ```
 
-The script automatically sets up everything including Nginx, SSL, and firewall. See **[QUICKSTART.md](QUICKSTART.md)** for details.
+The setup script installs dependencies, builds the application, configures systemd service, sets up Nginx reverse proxy, configures firewall, and optionally enables SSL/HTTPS.
 
-### Local Development
-
-```bash
-go run main.go
-# Then open: http://localhost:8080
-```
-
-## System Requirements
+## Requirements
 
 - Go 1.22.2 or higher
-- Modern web browser (Chrome, Firefox, Safari, Edge)
-- Network connection
-- For production: Linux VPS (Ubuntu/Debian/CentOS/RHEL)
-
-## Installation and Setup
-
-### 1. Build the Server
-
-```bash
-go build -o speedtest-server main.go
-```
-
-### 2. Run the Server
-
-```bash
-./speedtest-server
-```
-
-Or run directly without building:
-
-```bash
-go run main.go
-```
-
-The server will start on port 8080 by default.
-
-### 3. Access the Application
-
-Open your web browser and navigate to:
-
-```
-http://localhost:8080
-```
-
-## Usage
-
-1. The server URL field is auto-detected based on the current domain
-2. Click the "Start Test" button to begin the speed test
-3. The test will run in three phases:
-   - **Ping Test**: Measures latency by sending 5 ping requests
-   - **Download Test**: Downloads 50 MB of data to measure download speed
-   - **Upload Test**: Uploads 25 MB of data to measure upload speed
-4. Results are displayed in real-time and summarized at the end
+- Linux VPS (Ubuntu/Debian/CentOS/RHEL) for production
+- Domain name (for production with SSL)
 
 ## API Endpoints
 
-The backend provides the following REST API endpoints:
-
-- `GET /` - Serves the frontend HTML interface
-- `GET /ping` - Returns a timestamp for latency measurement
-- `GET /download?size=<bytes>` - Generates random data for download testing (default: 50MB, max: 100MB)
-- `POST /upload` - Receives data for upload testing
-- `GET /health` - Health check endpoint
+- `GET /` - Web interface
+- `GET /ping` - Latency measurement (returns timestamp)
+- `GET /download?size=<bytes>` - Download test (default 100MB, max 2GB)
+- `POST /upload` - Upload test
+- `GET /health` - Health check
 
 ## Configuration
 
-You can modify the following parameters in `index.html` if needed:
+Edit `index.html` to modify test parameters:
 
 ```javascript
 const CONFIG = {
-    PING_COUNT: 5,                    // Number of ping tests to average
-    DOWNLOAD_SIZE: 50 * 1024 * 1024,  // 50 MB download
-    UPLOAD_SIZE: 25 * 1024 * 1024,    // 25 MB upload
-    DOWNLOAD_DURATION: 10000,         // Target 10 seconds for download
-    UPLOAD_DURATION: 10000            // Target 10 seconds for upload
+    PING_COUNT: 5,                    // Number of ping samples
+    DOWNLOAD_SIZE: 50 * 1024 * 1024,  // 50MB
+    UPLOAD_SIZE: 25 * 1024 * 1024,    // 25MB
+    DOWNLOAD_DURATION: 10000,         // 10 seconds
+    UPLOAD_DURATION: 10000            // 10 seconds
 };
 ```
 
-## Technical Details
+## Technical Implementation
 
 ### Backend (Go)
 
-- Uses standard `net/http` library
-- **High-performance**: Pre-generates random data buffer at startup (1MB) for maximum speed
-- Implements CORS middleware for cross-origin requests
-- Efficient streaming for large data transfers with 1MB chunks
-- Memory-efficient design - reuses pre-generated buffer
+- Standard `net/http` library
+- Pre-generated random data buffer (1MB) for performance
+- CORS middleware for cross-origin requests
+- Streaming transfers with 1MB chunks
+- TCP optimizations: 1MB buffers, TCP_NODELAY enabled, keep-alive configured
+- 30s read/write timeouts, 120s idle timeout
 
 ### Frontend (JavaScript)
 
-- Vanilla JavaScript (no external dependencies)
-- **Parallel connections**: Uses 4 simultaneous connections for download and upload tests to saturate bandwidth
-- Uses `fetch` API with ReadableStream for download tests
-- Uses `XMLHttpRequest` for upload tests (for progress tracking)
-- Real-time speed calculations with throttled UI updates (100ms intervals)
-- Responsive design with CSS Grid and Flexbox
+- Vanilla JavaScript, zero dependencies
+- 4 parallel connections for download/upload to saturate bandwidth
+- `fetch` API with ReadableStream for downloads
+- `XMLHttpRequest` for uploads (progress tracking)
+- Throttled UI updates (100ms intervals)
+- Responsive CSS Grid/Flexbox layout
 
 ### Speed Calculation
 
-- **Download Speed**: Measured using 4 parallel connections, dividing total bits received by elapsed time
-- **Upload Speed**: Measured using 4 parallel connections, dividing total bits sent by elapsed time
-- **Ping/Latency**: Calculated as the average RTT of 5 ping requests
-- All speeds are reported in Mbps (Megabits per second)
-- UI updates throttled to 100ms intervals to reduce overhead and improve accuracy
+- Download/Upload: Total bits transferred / elapsed time (4 parallel connections)
+- Ping: Average RTT over 5 samples
+- Units: Mbps (Megabits per second)
 
-## Deployment
+## Manual Build
 
-### Local Development
+```bash
+go build -o speedtest-server main.go
+./speedtest-server
+```
 
-See instructions above for running locally.
+## Deployment Options
 
-### VPS/Production Deployment
+### Automated (Recommended)
 
-For detailed VPS deployment instructions (including systemd service, Nginx reverse proxy, SSL setup, etc.), see:
+```bash
+./setup.sh
+```
 
-**[DEPLOYMENT.md](DEPLOYMENT.md)**
+Configures:
+- Go installation
+- Nginx with unlimited upload/download
+- Systemd service (auto-start on boot)
+- Firewall (ports 80, 443, 8080)
+- Optional SSL via Let's Encrypt
 
-Quick VPS setup:
+### Manual Deployment
+
 ```bash
 # Build
 go build -o speedtest-server main.go
 
-# Run directly on port 8080
-./speedtest-server
+# Install systemd service
+sudo cp speedtest.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable speedtest
+sudo systemctl start speedtest
 
-# Access at: http://your-domain.com:8080
+# Configure Nginx
+sudo sed "s/DOMAIN_NAME/your-domain.com/g" nginx.conf.template > /etc/nginx/sites-available/speedtest
+sudo ln -s /etc/nginx/sites-available/speedtest /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+
+# Setup SSL
+./setup-ssl.sh
 ```
 
-For production use with your domain (e.g., `speedtest.selimsandal.com`):
-- Set up systemd service for auto-restart
-- Configure Nginx reverse proxy for standard HTTP/HTTPS ports
-- Add SSL certificate with Let's Encrypt
+### Alternative Scripts
 
-See DEPLOYMENT.md for complete instructions.
+- `./deploy.sh` - Interactive deployment menu
+- `./setup-ssl.sh` - SSL/HTTPS setup only
 
-## Notes
+## Service Management
 
-- The server limits download size to a maximum of 100MB to prevent abuse
-- Data is generated randomly and is not cached to ensure accurate measurements
-- CORS is enabled to allow testing from different origins
-- The application does not require any external libraries or dependencies for core functionality
+```bash
+# Status
+sudo systemctl status speedtest
+
+# Start/Stop/Restart
+sudo systemctl start speedtest
+sudo systemctl stop speedtest
+sudo systemctl restart speedtest
+
+# Logs
+sudo journalctl -u speedtest -f
+sudo journalctl -u speedtest -n 100
+```
+
+## Nginx Management
+
+```bash
+# Test configuration
+sudo nginx -t
+
+# Reload without downtime
+sudo systemctl reload nginx
+
+# Restart
+sudo systemctl restart nginx
+```
+
+## Nginx Configuration
+
+The template includes optimizations for accurate speed testing:
+
+- `client_max_body_size 0` - Unlimited upload
+- Extended timeouts (300s)
+- Disabled buffering (`proxy_buffering off`, `proxy_request_buffering off`)
+- Proxy to backend on port 8080
+
+## Updating
+
+```bash
+git pull
+go build -o speedtest-server main.go
+sudo systemctl restart speedtest
+```
+
+## Troubleshooting
+
+### Check Server Status
+
+```bash
+ps aux | grep speedtest-server
+sudo ss -tlnp | grep 8080
+curl http://localhost:8080/health
+```
+
+### View Logs
+
+```bash
+sudo journalctl -u speedtest -f
+sudo tail -f /var/log/nginx/access.log
+sudo tail -f /var/log/nginx/error.log
+```
+
+### Common Issues
+
+Port in use:
+```bash
+sudo lsof -i :8080
+sudo kill -9 <PID>
+```
+
+Permissions:
+```bash
+chmod +x speedtest-server setup.sh deploy.sh setup-ssl.sh
+```
+
+Firewall:
+```bash
+# Ubuntu/Debian
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 8080/tcp
+
+# CentOS/RHEL
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --permanent --add-port=8080/tcp
+sudo firewall-cmd --reload
+```
+
+DNS verification:
+```bash
+dig your-domain.com
+```
+
+SSL certificate issues:
+```bash
+sudo certbot --nginx -d your-domain.com --dry-run
+```
+
+## Performance Tuning
+
+Edit `/etc/nginx/nginx.conf`:
+
+```nginx
+worker_processes auto;
+worker_connections 4096;
+keepalive_timeout 65;
+```
+
+Then restart: `sudo systemctl restart nginx`
+
+## Security
+
+- Use HTTPS in production (`./setup-ssl.sh`)
+- Keep system updated: `sudo apt update && sudo apt upgrade`
+- Install fail2ban: `sudo apt install fail2ban`
+- Monitor logs for suspicious activity
+- Configure firewall (UFW/firewalld)
 
 ## Testing Accuracy
 
 For best results:
-- Close other applications using network bandwidth
-- Run multiple tests and compare results
-- Test at different times of day
-- Compare results with other speed test tools (speedtest.net, fast.com) from nearby servers
-- Results should be similar but may vary slightly due to network conditions
-
-## Troubleshooting
-
-**Cannot connect to server:**
-- Verify the server is running
-- Check that port 8080 is not blocked by firewall
-- Ensure the server URL is correct
-
-**Tests are slow or timeout:**
-- Check your network connection
-- Verify server has sufficient bandwidth
-- Try reducing test data sizes in the configuration
-
-**Inaccurate results:**
 - Close bandwidth-intensive applications
-- Run multiple tests for consistency
-- Check for network congestion
-- Verify server is not under heavy load
+- Run multiple tests and average results
+- Test at different times
+- Compare with other tools (speedtest.net, fast.com)
+- Results vary based on network conditions
+
+## Files
+
+- `main.go` - Go backend server
+- `index.html` - Frontend interface
+- `setup.sh` - Automated deployment
+- `deploy.sh` - Deployment menu
+- `setup-ssl.sh` - SSL configuration
+- `nginx.conf.template` - Nginx template
+- `speedtest.service` - Systemd service
+- `go.mod` - Go module definition
